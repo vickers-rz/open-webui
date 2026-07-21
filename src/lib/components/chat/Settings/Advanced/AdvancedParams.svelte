@@ -48,7 +48,7 @@
 		num_gpu: null
 	};
 
-	export let params = defaultParams;
+	export let params: Partial<typeof defaultParams> & Record<string, any> = defaultParams;
 	$: if (params) {
 		onChange(params);
 	}

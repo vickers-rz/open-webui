@@ -70,7 +70,7 @@
 			</div>
 
 			<div>
-				<button
+				<button aria-label="Download image"
 					class=" p-5 z-999"
 					on:click={() => {
 						if (src.startsWith('data:image/')) {

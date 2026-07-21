@@ -95,7 +95,8 @@
 					: ''} text-xs bg-transparent outline-hidden placeholder:text-gray-400 dark:placeholder:text-gray-500"
 				placeholder={$i18n.t('Add a tag...')}
 				role="combobox"
-				aria-autocomplete="list"
+					aria-autocomplete="list"
+					aria-controls="tag-suggestions"
 				aria-expanded={suggestionsOpen && filteredSuggestionTags.length > 0}
 				autocomplete="off"
 				on:focus={() => {
@@ -124,7 +125,8 @@
 			/>
 
 			{#if suggestionsOpen && filteredSuggestionTags.length > 0}
-				<div
+					<div
+						id="tag-suggestions"
 					use:portal
 					bind:this={popupElement}
 					class="fixed w-48 max-h-48 overflow-y-auto rounded-2xl border border-gray-200 bg-white p-0.5 shadow-lg dark:border-gray-800 dark:bg-gray-850"
@@ -136,6 +138,7 @@
 							type="button"
 							class="flex w-full items-center rounded-xl px-2 py-[5px] text-left text-xs text-gray-700 transition-colors hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
 							role="option"
+							aria-selected="false"
 							on:mousedown={(event) => {
 								event.preventDefault();
 							}}

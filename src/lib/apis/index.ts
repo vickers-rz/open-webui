@@ -249,8 +249,9 @@ export const chatCompleted = async (token: string, body: ChatCompletedForm) => {
 };
 
 type ChatActionForm = {
+	[key: string]: any;
 	model: string;
-	messages: string[];
+	messages: any[];
 	chat_id: string;
 };
 
@@ -824,7 +825,7 @@ export const generateTitle = async (
 export const generateTags = async (
 	token: string = '',
 	model: string,
-	messages: string,
+	messages: any[],
 	chat_id?: string
 ) => {
 	let error = null;
@@ -1744,15 +1745,19 @@ export interface ModelConfig {
 	id: string;
 	name: string;
 	meta: ModelMeta;
-	base_model_id?: string;
+	base_model_id?: string | null;
 	params: ModelParams;
+	access_grants?: any[];
 }
 
 export interface ModelMeta {
-	toolIds: never[];
+	[key: string]: any;
+	toolIds?: string[];
 	description?: string;
-	capabilities?: object;
+	capabilities?: Record<string, any>;
 	profile_image_url?: string;
 }
 
-export interface ModelParams {}
+export interface ModelParams {
+	[key: string]: any;
+}

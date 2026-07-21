@@ -9,7 +9,11 @@
 	import Permissions from './Permissions.svelte';
 	import Users from './Users.svelte';
 	import GroupPreviewPanel from './GroupPreviewPanel.svelte';
-	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
+	import {
+		DEFAULT_PERMISSIONS,
+		type PartialPermissionConfig,
+		type PermissionConfig
+	} from '$lib/constants/permissions';
 	import { getUserDefaultPermissions, getUserDefaultPermissionsDefaults } from '$lib/apis/users';
 	import UserPlusSolid from '$lib/components/icons/UserPlusSolid.svelte';
 	import WrenchSolid from '$lib/components/icons/WrenchSolid.svelte';
@@ -24,7 +28,7 @@
 	export let edit = false;
 
 	export let group = null;
-	export let defaultPermissions = {};
+	export let defaultPermissions: PartialPermissionConfig = {};
 
 	export let custom = true;
 
@@ -41,7 +45,7 @@
 	export let description = '';
 	export let data = {};
 
-	export let permissions = DEFAULT_PERMISSIONS;
+	export let permissions: PermissionConfig = structuredClone(DEFAULT_PERMISSIONS);
 
 	const submitHandler = async () => {
 		loading = true;

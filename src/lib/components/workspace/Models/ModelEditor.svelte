@@ -11,6 +11,7 @@
 	import { getModelsDefaults } from '$lib/apis/configs';
 	import { getBaseModelTags, getModelTags } from '$lib/apis/models';
 	import { getVoices } from '$lib/apis/audio';
+	import type { ModelConfig, ModelParams } from '$lib/apis';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
 	import ModelSelector from '$lib/components/chat/ModelSelector/Selector.svelte';
@@ -75,7 +76,7 @@
 	}
 
 	let system = '';
-	let info = {
+	let info: ModelConfig = {
 		id: '',
 		base_model_id: null,
 		name: '',
@@ -90,7 +91,7 @@
 		}
 	};
 
-	let params = {
+	let params: ModelParams = {
 		system: ''
 	};
 
@@ -957,7 +958,7 @@
 									value={JSON.stringify(info, null, 2)}
 									disabled
 									readonly
-								/>
+								></textarea>
 							</div>
 						{/if}
 					</div>

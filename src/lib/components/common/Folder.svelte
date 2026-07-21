@@ -174,7 +174,8 @@
 
 					{#if onAdd}
 						<button
-							class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
+							class="absolute z-10 right-2 invisible group-hover:visible self-center flex items-center p-0.5 dark:text-gray-300 dark:hover:bg-gray-850 rounded-lg touch-auto"
+							aria-label={onAddLabel}
 							on:pointerup={(e) => {
 								e.stopPropagation();
 							}}
@@ -183,13 +184,8 @@
 								onAdd();
 							}}
 						>
-							<Tooltip content={onAddLabel}>
-								<button
-									class="p-0.5 dark:hover:bg-gray-850 rounded-lg touch-auto"
-									on:click={(e) => {}}
-								>
-									<Plus className=" size-3" strokeWidth="2.5" />
-								</button>
+							<Tooltip content={onAddLabel} as="span">
+								<Plus className=" size-3" strokeWidth="2.5" />
 							</Tooltip>
 						</button>
 					{/if}

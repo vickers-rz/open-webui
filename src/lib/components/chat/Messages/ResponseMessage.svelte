@@ -67,14 +67,16 @@
 	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
 
 	interface MessageType {
+		[key: string]: any;
 		id: string;
 		model: string;
 		content: string;
 		output?: OutputItem[];
-		files?: { type: string; url: string }[];
+		files?: { type: string; url: string; name?: string; size?: number; content_type?: string }[];
 		timestamp: number;
 		role: string;
 		statusHistory?: {
+			[key: string]: any;
 			done: boolean;
 			action: string;
 			description: string;
@@ -82,6 +84,7 @@
 			query?: string;
 		}[];
 		status?: {
+			[key: string]: any;
 			done: boolean;
 			action: string;
 			description: string;
@@ -115,7 +118,7 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
-		annotation?: { type: string; rating: number };
+		annotation?: { type?: string; rating?: number; tags?: any[]; [key: string]: any };
 	}
 
 	export let chatId = '';
@@ -167,7 +170,7 @@
 	export let editCodeBlock = true;
 	export let topPadding = false;
 
-	let citationsElement: HTMLDivElement;
+	let citationsElement: { showSourceModal: (sourceId: any) => void };
 
 	let contentContainerElement: HTMLDivElement;
 	let buttonsContainerElement: HTMLDivElement;
@@ -299,9 +302,7 @@
 			if ($settings.audio?.tts?.engine === 'browser-kokoro') {
 				if (!$TTSWorker) {
 					await TTSWorker.set(
-						new KokoroWorker({
-							dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-						})
+						new KokoroWorker($settings.audio?.tts?.engineConfig?.dtype ?? 'fp32')
 					);
 
 					await $TTSWorker.init();
@@ -447,7 +448,7 @@
 		feedbackLoading = true;
 		console.log('Feedback', rating, details);
 
-		const updatedMessage = {
+		const updatedMessage: MessageType = {
 			...message,
 			annotation: {
 				...(message?.annotation ?? {}),
@@ -465,7 +466,7 @@
 
 		const messages = createMessagesList(history, message.id);
 
-		let feedbackItem = {
+		let feedbackItem: any = {
 			type: 'rating',
 			data: {
 				...(updatedMessage?.annotation ? updatedMessage.annotation : {}),
@@ -651,7 +652,7 @@
 	<div
 		class=" flex w-full message-{message.id}"
 		id="message-{message.id}"
-		dir={$settings.chatDirection}
+		dir={$settings.chatDirection?.toLowerCase() as 'ltr' | 'rtl' | 'auto'}
 		style="scroll-margin-top: 3rem;"
 	>
 		<div class={`shrink-0 ltr:mr-3 rtl:ml-3 hidden @lg:flex mt-1 `}>
@@ -698,7 +699,7 @@
 						{#if message?.files && message.files?.filter( (f) => ['image', 'file'].includes(f.type) ).length > 0}
 							<div
 								class="my-1 w-full flex overflow-x-auto gap-2 flex-wrap"
-								dir={$settings?.chatDirection ?? 'auto'}
+								dir={$settings?.chatDirection?.toLowerCase() as 'ltr' | 'rtl' | 'auto'}
 							>
 								{#each message.files.filter((f) => ['image', 'file'].includes(f.type)) as file}
 									<div>
@@ -759,8 +760,8 @@
 											const messagesContainer = document.getElementById('messages-container');
 											const savedScrollTop = messagesContainer?.scrollTop;
 
-											e.target.style.height = '';
-											e.target.style.height = `${e.target.scrollHeight}px`;
+										e.currentTarget.style.height = '';
+										e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
 
 											if (messagesContainer) messagesContainer.scrollTop = savedScrollTop;
 										}}
@@ -776,7 +777,7 @@
 												document.getElementById('confirm-edit-message-button')?.click();
 											}
 										}}
-									/>
+									></textarea>
 								{/if}
 
 								<div class=" mt-2 mb-1 flex justify-between text-sm font-medium">
@@ -830,6 +831,8 @@
 								<ContentRenderer
 									id={`${chatId}-${message.id}`}
 									content={message.content}
+									{history}
+									messageId={message.id}
 									output={message.output}
 									sources={message.sources}
 									floatingButtons={message?.done &&
@@ -885,7 +888,7 @@
 							{/if}
 
 							{#if message?.error}
-								<Error content={message?.error?.content ?? message.content} />
+								<Error content={(message.error as any)?.content ?? message.content} />
 							{/if}
 
 							{#if (message?.sources || message?.citations) && (model?.info?.meta?.capabilities?.citations ?? true)}
@@ -948,15 +951,15 @@
 												min="1"
 												max={siblings.length}
 												on:focus={(e) => {
-													e.target.select();
+											e.currentTarget.select();
 												}}
 												on:blur={(e) => {
-													gotoMessage(message, e.target.value - 1);
+											gotoMessage(message, Number(e.currentTarget.value) - 1);
 													messageIndexEdit = false;
 												}}
 												on:keydown={(e) => {
 													if (e.key === 'Enter') {
-														gotoMessage(message, e.target.value - 1);
+												gotoMessage(message, Number(e.currentTarget.value) - 1);
 														messageIndexEdit = false;
 													}
 												}}
@@ -971,7 +974,9 @@
 												messageIndexEdit = true;
 
 												await tick();
-												const input = document.getElementById(`message-index-input-${message.id}`);
+										const input = document.getElementById(
+											`message-index-input-${message.id}`
+										) as HTMLInputElement | null;
 												if (input) {
 													input.focus();
 													input.select();
@@ -1319,7 +1324,7 @@
 
 									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.regenerate_response ?? true)}
 										{#if $settings?.regenerateMenu ?? true}
-											<button
+											<button aria-label="Regenerate response"
 												type="button"
 												class="hidden regenerate-response-button"
 												on:click={() => {
@@ -1338,7 +1343,7 @@
 														});
 													});
 												}}
-											/>
+											></button>
 
 											<RegenerateMenu
 												onRegenerate={(prompt = null) => {

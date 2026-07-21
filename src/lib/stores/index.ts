@@ -55,23 +55,23 @@ export const TTSWorker = writable(null);
 export const chatId = writable('');
 export const chatTitle = writable('');
 
-export const channels = writable([]);
+export const channels: Writable<any[]> = writable([]);
 export const channelId = writable(null);
 
-export const chats = writable(null);
-export const pinnedChats = writable([]);
-export const pinnedNotes = writable([]);
-export const tags = writable([]);
-export const folders = writable([]);
+export const chats: Writable<any> = writable(null);
+export const pinnedChats: Writable<any[]> = writable([]);
+export const pinnedNotes: Writable<any[]> = writable([]);
+export const tags: Writable<any[]> = writable([]);
+export const folders: Writable<any[]> = writable([]);
 
 export const selectedFolder = writable(null);
 
 export const models: Writable<Model[]> = writable([]);
 
 export const knowledge: Writable<null | Document[]> = writable(null);
-export const tools = writable(null);
-export const skills = writable(null);
-export const functions = writable(null);
+export const tools: Writable<any> = writable(null);
+export const skills: Writable<any> = writable(null);
+export const functions: Writable<any> = writable(null);
 
 export const toolServers = writable([]);
 export const terminalServers = writable([]);
@@ -131,10 +131,14 @@ export const playingNotificationSound = writable(false);
 export type Model = OpenAIModel | OllamaModel;
 
 type BaseModel = {
+	[key: string]: any;
 	id: string;
 	name: string;
 	info?: ModelConfig;
 	owned_by: 'ollama' | 'openai' | 'arena';
+	preset?: boolean;
+	arena?: boolean;
+	direct?: boolean;
 };
 
 export interface OpenAIModel extends BaseModel {
@@ -179,6 +183,8 @@ type OllamaModelDetails = {
 };
 
 type Settings = {
+	[key: string]: any;
+	[key: string]: any;
 	pinnedModels?: never[];
 	toolServers?: never[];
 	detectArtifacts?: boolean;
@@ -278,6 +284,7 @@ type Document = {
 };
 
 type Config = {
+	[key: string]: any;
 	license_metadata: any;
 	status: boolean;
 	name: string;
@@ -286,6 +293,7 @@ type Config = {
 	default_models: string;
 	default_prompt_suggestions: PromptSuggestion[];
 	features: {
+		[key: string]: any;
 		auth: boolean;
 		auth_trusted_header: boolean;
 		enable_api_keys: boolean;
@@ -315,6 +323,7 @@ type Config = {
 		auto_redirect?: boolean;
 	};
 	ui?: {
+		[key: string]: any;
 		pending_user_overlay_title?: string;
 		pending_user_overlay_content?: string;
 		iframe_csp?: string;

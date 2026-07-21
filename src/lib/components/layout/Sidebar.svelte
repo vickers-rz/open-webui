@@ -791,7 +791,7 @@
 		on:mousedown={() => {
 			showSidebar.set(!$showSidebar);
 		}}
-	/>
+	></div>
 {/if}
 
 <SearchModal
@@ -803,14 +803,14 @@
 	}}
 />
 
-<button
+<button aria-label="Start new chat"
 	id="sidebar-new-chat-button"
 	class="hidden"
 	on:click={() => {
 		goto('/');
 		newChatHandler();
 	}}
-/>
+></button>
 
 <svelte:window
 	on:mousemove={(e) => {
@@ -846,7 +846,7 @@
 					>
 						<div class=" self-center flex items-center justify-center size-9">
 							<img
-								src="{WEBUI_BASE_URL}/static/favicon.png"
+								src="/static/favicon.png"
 								class="sidebar-new-chat-icon size-6 rounded-full group-hover:hidden"
 								alt=""
 							/>
@@ -1055,12 +1055,7 @@
 					draggable="false"
 					on:click={newChatHandler}
 				>
-					<img
-						crossorigin="anonymous"
-						src="{WEBUI_BASE_URL}/static/favicon.png"
-						class="sidebar-new-chat-icon size-6 rounded-full"
-						alt=""
-					/>
+					<img src="/static/favicon.png" class="sidebar-new-chat-icon size-6 rounded-full" alt="" />
 				</a>
 
 				<a href="/" class="flex flex-1 px-0.5" on:click={newChatHandler}>
@@ -1654,15 +1649,28 @@
 	</div>
 
 	{#if !$mobile}
+		<!-- A focusable ARIA separator is the resize handle widget. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="relative flex items-center justify-center group border-l border-gray-50 dark:border-gray-850/30 hover:border-gray-200 dark:hover:border-gray-800 transition z-20"
 			id="sidebar-resizer"
+			aria-label="Resize sidebar"
 			on:mousedown={resizeStartHandler}
+			on:keydown={(event) => {
+				if (event.key === 'ArrowLeft') sidebarWidth.set(Math.max(200, $sidebarWidth - 10));
+				if (event.key === 'ArrowRight') sidebarWidth.set(Math.min(500, $sidebarWidth + 10));
+			}}
 			role="separator"
+			tabindex="0"
+			aria-orientation="vertical"
+			aria-valuemin="200"
+			aria-valuemax="500"
+			aria-valuenow={$sidebarWidth}
 		>
 			<div
 				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
-			/>
+			></div>
 		</div>
 	{/if}
 {/if}

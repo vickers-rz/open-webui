@@ -336,6 +336,8 @@
 							groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
 						<div
+							role="button"
+							tabindex="0"
 							class=" snap-center w-full max-w-full m-1 border {history.messages[messageId]
 								?.modelIdx == modelIdx
 								? `bg-gray-50 dark:bg-gray-850 border-gray-100 dark:border-gray-800 border-2 ${
@@ -346,6 +348,11 @@
 									}`} transition-all p-5 rounded-2xl"
 							on:click={async () => {
 								onGroupClick(_messageId, modelIdx);
+							}}
+							on:keydown={async (event) => {
+								if (event.key === 'Enter' || event.key === ' ') {
+									await onGroupClick(_messageId, modelIdx);
+								}
 							}}
 						>
 							{#key history.currentId}

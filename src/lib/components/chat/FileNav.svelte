@@ -1299,8 +1299,14 @@
 		<!-- Content -->
 		<div
 			class="flex-1 overflow-y-auto min-h-0 min-w-0"
+			role="button"
+			tabindex="0"
+			aria-label="Clear file selection"
 			on:click={(e) => {
 				if (e.target === e.currentTarget && selectedCount > 0) clearSelection();
+			}}
+			on:keydown={(e) => {
+				if ((e.key === 'Enter' || e.key === ' ') && selectedCount > 0) clearSelection();
 			}}
 		>
 			{#if previewPort !== null}
@@ -1472,8 +1478,8 @@
 					<div class="relative cursor-row-resize group" on:mousedown={onHandleMouseDown}>
 						<div
 							class="h-px bg-transparent group-hover:bg-black/10 dark:group-hover:bg-white/10 transition"
-						/>
-						<div class="absolute inset-x-0 -top-1.5 -bottom-1.5" />
+						></div>
+						<div class="absolute inset-x-0 -top-1.5 -bottom-1.5"></div>
 					</div>
 				{/if}
 
@@ -1503,7 +1509,7 @@
 								: terminalConnecting
 									? 'bg-yellow-500 animate-pulse'
 									: 'bg-gray-400'}"
-						/>
+						></div>
 					{/if}
 
 					<svg

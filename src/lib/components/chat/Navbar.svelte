@@ -49,6 +49,7 @@
 	export let scrollToTop: (() => void) | null = null;
 
 	export let chat;
+	export let title = '';
 	export let history;
 	export let selectedModels;
 	export let showModelSelector = true;
@@ -81,7 +82,7 @@
 		initNewChat();
 	}}
 	aria-label="New Chat"
-/>
+></button>
 
 <nav
 	class="sticky top-0 z-30 w-full {chat?.id
@@ -224,6 +225,7 @@
 							<button
 								class="flex cursor-pointer px-2 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 								id="chat-context-menu-button"
+								aria-label={$i18n.t('Chat Menu')}
 							>
 								<div class=" m-auto self-center">
 									<EllipsisHorizontal className=" size-5" strokeWidth="1.5" />

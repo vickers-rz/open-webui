@@ -221,7 +221,10 @@
 
 	let chatTasks = [];
 
-	let history = {
+	let history: {
+		messages: Record<string, any>;
+		currentId: string | null;
+	} = {
 		messages: {},
 		currentId: null
 	};
@@ -232,7 +235,7 @@
 	let prompt = '';
 	let chatFiles = [];
 	let files = [];
-	let params = {};
+	let params: Record<string, any> = {};
 
 	$: if (chatIdProp) {
 		navigateHandler();
@@ -928,7 +931,9 @@
 
 		$audioQueue?.destroy();
 
-		const audioQueueInstance = new AudioQueue(document.getElementById('audioElement'));
+		const audioQueueInstance = new AudioQueue(
+			document.getElementById('audioElement') as HTMLAudioElement
+		);
 		audioQueue.set(audioQueueInstance);
 
 		// Restore direct terminal enabled states based on persisted selectedTerminalId
@@ -1058,9 +1063,7 @@
 			id: fileData.id,
 			name: fileData.name,
 			url: fileData.url,
-			headers: {
-				Authorization: `Bearer ${token}`
-			}
+			headers: fileData.headers
 		});
 
 		// Validate input
@@ -1219,7 +1222,7 @@
 
 				files = [...files];
 			} catch (e) {
-				files = files.filter((f) => f.name !== url);
+			files = files.filter((f) => f.name !== fileItem.url);
 				toast.error(`${e}`);
 			}
 		}
@@ -1388,7 +1391,9 @@
 						modelSelectorButton.click();
 						await tick();
 
-						const modelSelectorInput = document.getElementById('model-search-input');
+						const modelSelectorInput = document.getElementById(
+							'model-search-input'
+						) as HTMLInputElement | null;
 						if (modelSelectorInput) {
 							modelSelectorInput.focus();
 							modelSelectorInput.value = urlModels[0];
@@ -1458,7 +1463,7 @@
 		await showArtifacts.set(false);
 
 		if ($page.url.pathname.includes('/c/')) {
-			window.history.replaceState(history.state, '', `/`);
+			window.history.replaceState(window.history.state, '', `/`);
 		}
 
 		autoScroll = true;
@@ -1683,7 +1688,7 @@
 		}
 	};
 
-	const scrollToBottom = async (behavior = 'auto') => {
+	const scrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
 		await tick();
 		if (messagesContainerElement) {
 			messagesContainerElement.scrollTo({
@@ -2654,7 +2659,7 @@
 				if (res.chat_id && $chatId !== res.chat_id && $chatId === _chatId) {
 					await chatId.set(res.chat_id);
 					if (!$temporaryChatEnabled) {
-						window.history.replaceState(history.state, '', `/c/${res.chat_id}`);
+						window.history.replaceState(window.history.state, '', `/c/${res.chat_id}`);
 						currentChatPage.set(1);
 						await chats.set(await getChatList(localStorage.token, $currentChatPage));
 
@@ -3155,21 +3160,21 @@
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
 					style="background-image: url({$selectedFolder?.meta?.background_image_url})  "
-				/>
+				></div>
 
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
-				/>
+				></div>
 			{:else if $settings?.backgroundImageUrl ?? $config?.license_metadata?.background_image_url ?? null}
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
 					style="background-image: url({$settings?.backgroundImageUrl ??
 						$config?.license_metadata?.background_image_url})  "
-				/>
+				></div>
 
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
-				/>
+				></div>
 			{/if}
 
 			<PaneGroup direction="horizontal" class="w-full h-full">

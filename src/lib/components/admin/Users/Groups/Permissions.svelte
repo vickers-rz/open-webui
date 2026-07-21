@@ -5,17 +5,24 @@
 	import Switch from '$lib/components/common/Switch.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
-	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
+	import {
+		DEFAULT_PERMISSIONS,
+		type PartialPermissionConfig,
+		type PermissionConfig
+	} from '$lib/constants/permissions';
 
-	export let permissions = {};
-	export let defaultPermissions = {};
+	export let permissions: PermissionConfig = fillMissingProperties({}, DEFAULT_PERMISSIONS);
+	export let defaultPermissions: PartialPermissionConfig = {};
 
 	// Reactive statement to ensure all fields are present in `permissions`
 	$: {
 		permissions = fillMissingProperties(permissions, DEFAULT_PERMISSIONS);
 	}
 
-	function fillMissingProperties(obj: any, defaults: any) {
+	function fillMissingProperties(
+		obj: PartialPermissionConfig,
+		defaults: typeof DEFAULT_PERMISSIONS
+	): PermissionConfig {
 		return {
 			...defaults,
 			...obj,

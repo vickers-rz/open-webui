@@ -190,6 +190,7 @@
 		bind:this={contentEl}
 		class={contentClass}
 		role="menu"
+		tabindex="-1"
 		style:max-height={maxHeight}
 		style:overflow-y="auto"
 		transition:flyAndScale

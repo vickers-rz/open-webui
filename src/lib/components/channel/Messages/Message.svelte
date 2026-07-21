@@ -163,6 +163,7 @@
 {#if message}
 	<div
 		class="swipe-reply-wrapper relative"
+		role="group"
 		on:touchstart={handleTouchStart}
 		on:touchmove={handleTouchMove}
 		on:touchend={handleTouchEnd}
@@ -463,6 +464,8 @@
 									{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 										<Image src={fileUrl} alt={file.name} imageClassName=" max-h-96 rounded-lg" />
 									{:else if file.type === 'video' || (file?.content_type ?? '').startsWith('video/')}
+										<!-- User-provided video may not include a caption track. -->
+										<!-- svelte-ignore a11y_media_has_caption -->
 										<video src={fileUrl} controls class=" max-h-96 rounded-lg"></video>
 									{:else}
 										<FileItem

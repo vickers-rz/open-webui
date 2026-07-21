@@ -1,6 +1,6 @@
 import type { Writable } from 'svelte/store';
 import { v4 as uuidv4 } from 'uuid';
-import sha256 from 'js-sha256';
+import { sha256 } from 'js-sha256';
 import DOMPurify from 'dompurify';
 import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -230,7 +230,10 @@ export const convertMessagesToHistory = (messages) => {
 // A lost assistant placeholder may exist under its map key with only
 // completion fields (content/done/error), missing id/role/parentId.
 // Reconstruct graph fields so already-corrupted chats recover on open.
-export const sanitizeHistory = (history) => {
+export const sanitizeHistory = (history: {
+	messages: Record<string, any>;
+	currentId?: string | null;
+}) => {
 	if (!history?.messages || typeof history.messages !== 'object') return;
 
 	// Purge entries that aren't usable objects
@@ -247,7 +250,7 @@ export const sanitizeHistory = (history) => {
 	}
 
 	// Build reverse lookup: parent, indexed by child id
-	const parentByChildId = {};
+	const parentByChildId: Record<string, string> = {};
 	for (const [id, message] of Object.entries(history.messages)) {
 		for (const childId of message.childrenIds) {
 			parentByChildId[childId] = id;
@@ -719,13 +722,16 @@ export const transformFileName = (fileName) => {
 	return finalFileName;
 };
 
-export const calculateSHA256 = async (file) => {
+export const calculateSHA256 = async (file: File) => {
 	// Create a FileReader to read the file asynchronously
 	const reader = new FileReader();
 
 	// Define a promise to handle the file reading
-	const readFile = new Promise((resolve, reject) => {
-		reader.onload = () => resolve(reader.result);
+	const readFile = new Promise<ArrayBuffer>((resolve, reject) => {
+		reader.onload = () => {
+			if (reader.result instanceof ArrayBuffer) resolve(reader.result);
+			else reject(new TypeError('Expected FileReader to return an ArrayBuffer'));
+		};
 		reader.onerror = reject;
 	});
 
@@ -765,7 +771,7 @@ export const getImportOrigin = (_chats) => {
 
 export const getUserPosition = async (raw = false) => {
 	// Get the user's location using the Geolocation API
-	const position = await new Promise((resolve, reject) => {
+	const position = await new Promise<GeolocationPosition>((resolve, reject) => {
 		navigator.geolocation.getCurrentPosition(resolve, reject);
 	}).catch((error) => {
 		console.error('Error getting user location:', error);
@@ -1040,7 +1046,7 @@ export const processDetails = (content) => {
 	if (matches) {
 		for (const match of matches) {
 			const attributesRegex = /(\w+)="([^"]*)"/g;
-			const attributes = {};
+			const attributes: Record<string, string> = {};
 			let attributeMatch;
 			while ((attributeMatch = attributesRegex.exec(match)) !== null) {
 				attributes[attributeMatch[1]] = attributeMatch[2];
@@ -1411,7 +1417,11 @@ export const getLineCount = (text) => {
 };
 
 // Helper function to recursively resolve OpenAPI schema into JSON schema format
-function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
+function resolveSchema(
+	schemaRef: any,
+	components: any,
+	resolvedSchemas = new Set<string>()
+): Record<string, any> {
 	if (!schemaRef) return {};
 
 	if (schemaRef['$ref']) {
@@ -1428,7 +1438,7 @@ function resolveSchema(schemaRef, components, resolvedSchemas = new Set()) {
 	}
 
 	if (schemaRef.type) {
-		const schemaObj = { type: schemaRef.type };
+		const schemaObj: Record<string, any> = { type: schemaRef.type };
 
 		if (schemaRef.description) {
 			schemaObj.description = schemaRef.description;
@@ -2028,7 +2038,13 @@ export const renderVegaVisualization = async (spec: string, lang: string = '', i
 	return svg;
 };
 
-export const getCodeBlockContents = (content: string): object => {
+export const getCodeBlockContents = (content: string): {
+	codeBlocks: Array<{ lang: string; code: string }>;
+	html: string;
+	css: string;
+	js: string;
+	htmlGroups: Array<{ html: string; css: string; js: string }>;
+} => {
 	// Strip thinking/reasoning and other detail blocks before extracting code
 	// to prevent code inside <details type="reasoning"> from being treated as artifacts
 	content = removeAllDetails(content);

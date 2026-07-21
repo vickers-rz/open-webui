@@ -119,7 +119,7 @@
 	export let uploadPending = false;
 
 	export let atSelectedModel: Model | undefined = undefined;
-	export let selectedModels: [''];
+	export let selectedModels: string[] = [];
 
 	let selectedModelIds = [];
 	$: selectedModelIds = atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels;
@@ -582,7 +582,7 @@
 		try {
 			// Request screen media
 			const mediaStream = await navigator.mediaDevices.getDisplayMedia({
-				video: { cursor: 'never' },
+				video: true,
 				audio: false
 			});
 			// Once the user selects a screen, temporarily create a video element
@@ -628,7 +628,7 @@
 		}
 
 		const tempItemId = uuidv4();
-		const fileItem = {
+		const fileItem: Record<string, any> = {
 			type: 'file',
 			file: '',
 			id: null,
@@ -769,7 +769,11 @@
 					return;
 				}
 
-				const compressImageHandler = async (imageUrl, settings = {}, config = {}) => {
+				const compressImageHandler = async (
+					imageUrl: string,
+					settings: Record<string, any> = {},
+					config: Record<string, any> = {}
+				) => {
 					// Quick shortcut so we don’t do unnecessary work.
 					const settingsCompression = settings?.imageCompression ?? false;
 					const configWidth = config?.file?.image_compression?.width ?? null;
@@ -808,6 +812,7 @@
 				let reader = new FileReader();
 
 				reader.onload = async (event) => {
+					if (typeof event.target?.result !== 'string') return;
 					let imageUrl = event.target.result;
 
 					// Compress the image if settings or config require it
@@ -1244,7 +1249,7 @@
 						<div
 							class=" absolute -top-12 left-0 right-0 flex justify-center z-30 pointer-events-none"
 						>
-							<button
+							<button aria-label="Scroll to bottom"
 								class=" bg-white border border-gray-100 dark:border-none dark:bg-white/20 p-1.5 rounded-full pointer-events-auto"
 								on:click={() => {
 									autoScroll = true;
@@ -1327,11 +1332,11 @@
 							dispatch('submit', prompt);
 						}}
 					>
-						<button
+						<button aria-label="Generate message pair"
 							id="generate-message-pair-button"
 							class="hidden"
 							on:click={() => createMessagePair(prompt)}
-						/>
+						></button>
 
 						<!-- Task list display -->
 						{#if isActive && chatTasks.length > 0}
@@ -1363,7 +1368,7 @@
 							class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border {$temporaryChatEnabled
 								? 'border-dashed border-gray-100 dark:border-gray-800 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-700 focus-within:dark:border-gray-700'
 								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
-							dir={$settings?.chatDirection ?? 'auto'}
+							dir={$settings?.chatDirection?.toLowerCase() as 'ltr' | 'rtl' | 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
 								<div class="px-3 pt-3 text-left w-full flex flex-col z-10">
@@ -1395,7 +1400,7 @@
 							{#if files.length > 0}
 								<div
 									class="mx-2 mt-2.5 pb-1.5 flex items-center flex-wrap gap-2"
-									dir={$settings?.chatDirection ?? 'auto'}
+									dir={$settings?.chatDirection?.toLowerCase() as 'ltr' | 'rtl' | 'auto'}
 								>
 									{#each files as file, fileIdx}
 										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
@@ -1536,8 +1541,7 @@
 														!$mobile &&
 														!(
 															'ontouchstart' in window ||
-															navigator.maxTouchPoints > 0 ||
-															navigator.msMaxTouchPoints > 0
+														navigator.maxTouchPoints > 0
 														)}
 													placeholder={placeholder ? placeholder : $i18n.t('Send a Message')}
 													largeTextAsFile={($settings?.largeTextAsFile ?? false) && !shiftKey}
@@ -1603,8 +1607,7 @@
 																!$mobile ||
 																!(
 																	'ontouchstart' in window ||
-																	navigator.maxTouchPoints > 0 ||
-																	navigator.msMaxTouchPoints > 0
+															navigator.maxTouchPoints > 0
 																)
 															) {
 																if (inOrNearComposition(e)) {
@@ -1750,7 +1753,7 @@
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
 											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
-										/>
+										></div>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
@@ -2005,7 +2008,7 @@
 									{#if isActive && prompt === '' && files.length === 0}
 										<div class=" flex items-center">
 											<Tooltip content={$i18n.t('Stop')}>
-												<button
+												<button aria-label="Stop generating"
 													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
 													on:click={() => {
 														stopResponse();
@@ -2143,9 +2146,9 @@
 																	// If the user has not initialized the TTS worker, initialize it
 																	if (!$TTSWorker) {
 																		await TTSWorker.set(
-																			new KokoroWorker({
-																				dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-																			})
+													new KokoroWorker(
+														$settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
+													)
 																		);
 
 																		await $TTSWorker.init();
@@ -2212,7 +2215,7 @@
 								{@html DOMPurify.sanitize(marked($config?.license_metadata?.input_footer))}
 							</div>
 						{:else}
-							<div class="mb-1" />
+							<div class="mb-1"></div>
 						{/if}
 					</form>
 				</div>

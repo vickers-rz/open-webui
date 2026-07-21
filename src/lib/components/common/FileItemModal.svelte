@@ -262,8 +262,8 @@
 			<div class="flex items-start justify-between">
 				<div>
 					<div class=" font-medium text-lg dark:text-gray-100">
-						<a
-							href="#"
+						<button
+							type="button"
 							class="hover:underline line-clamp-1"
 							on:click|preventDefault={() => {
 								if (item.type === 'file' || item.url) {
@@ -280,7 +280,7 @@
 							}}
 						>
 							{item?.name ?? 'File'}
-						</a>
+						</button>
 					</div>
 				</div>
 
@@ -512,7 +512,7 @@
 							class="w-full border-0 rounded-lg mb-2"
 							controls
 							playsinline
-						/>
+						></audio>
 					{:else if isPDF}
 						<PDFViewer
 							url={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
@@ -594,7 +594,7 @@
 								</div>
 								{#if pptxSlides.length > 1}
 									<div class="flex items-center justify-center gap-3 pb-3 text-sm text-gray-500">
-										<button
+										<button aria-label="Previous slide"
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === 0}
 											on:click={() => (pptxCurrentSlide = Math.max(0, pptxCurrentSlide - 1))}
@@ -613,7 +613,7 @@
 											</svg>
 										</button>
 										<span>{pptxCurrentSlide + 1} / {pptxSlides.length}</span>
-										<button
+										<button aria-label="Next slide"
 											class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30"
 											disabled={pptxCurrentSlide === pptxSlides.length - 1}
 											on:click={() =>

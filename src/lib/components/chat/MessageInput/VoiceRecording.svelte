@@ -459,6 +459,7 @@
 	<div class="flex items-center mr-1">
 		<button
 			type="button"
+			aria-label={$i18n.t('Cancel')}
 			class="p-1.5
 
             {loading
@@ -494,7 +495,7 @@
                     
                     inline-block h-full"
 						style="height: {Math.min(100, Math.max(14, rms * 100))}%;"
-					/>
+					></div>
 				</div>
 			{/each}
 		</div>
@@ -606,7 +607,7 @@
 					>
 				</div>
 			{:else}
-				<button
+				<button aria-label="Confirm recording"
 					id="confirm-recording-button"
 					type="button"
 					class="p-1.5 bg-indigo-500 text-white dark:bg-indigo-500 dark:text-blue-950 rounded-full"

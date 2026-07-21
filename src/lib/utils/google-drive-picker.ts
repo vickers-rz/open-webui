@@ -104,7 +104,15 @@ const initialize = async () => {
 	}
 };
 
-export const createPicker = () => {
+type GoogleDrivePickerResult = {
+	id: string;
+	name: string;
+	url: string;
+	blob: Blob;
+	headers: Record<string, string>;
+};
+
+export const createPicker = (): Promise<GoogleDrivePickerResult | null> => {
 	return new Promise(async (resolve, reject) => {
 		try {
 			console.log('Initializing Google Drive Picker...');

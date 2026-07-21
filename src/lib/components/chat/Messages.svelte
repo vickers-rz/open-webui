@@ -24,13 +24,27 @@
 
 	const i18n = getContext('i18n');
 
+	interface ChatMessage {
+		id: string;
+		parentId: string | null;
+		childrenIds: string[];
+		role?: string;
+		content?: any;
+		[key: string]: any;
+	}
+
+	interface ChatHistory {
+		currentId: string | null;
+		messages: Record<string, ChatMessage>;
+	}
+
 	export let className = 'h-full flex pt-8';
 
 	export let chatId = '';
 	export let user = $_user;
 
 	export let prompt;
-	export let history = {};
+	export let history: ChatHistory = { currentId: null, messages: {} };
 	export let selectedModels;
 	export let atSelectedModel;
 
@@ -555,9 +569,9 @@
 						{/each}
 					</ul>
 				</section>
-				<div class="pb-18" />
+				<div class="pb-18"></div>
 				{#if bottomPadding}
-					<div class="  pb-6" />
+					<div class="  pb-6"></div>
 				{/if}
 			{/key}
 		</div>

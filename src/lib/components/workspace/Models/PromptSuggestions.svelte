@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { saveAs } from 'file-saver';
 	import { toast } from 'svelte-sonner';
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -94,6 +93,7 @@
 					class="flex text-xs items-center space-x-1 py-1 rounded-xl bg-transparent dark:text-gray-200 transition"
 					type="button"
 					on:click={async () => {
+						const { saveAs } = await import('file-saver');
 						let blob = new Blob([JSON.stringify(promptSuggestions)], {
 							type: 'application/json'
 						});
@@ -155,11 +155,11 @@
 								placeholder={$i18n.t('Prompt')}
 								rows="2"
 								bind:value={prompt.content}
-							/>
+							></textarea>
 						</Tooltip>
 					</div>
 
-					<button
+					<button aria-label="Delete prompt suggestion"
 						class="p-1 self-start"
 						type="button"
 						on:click={() => {

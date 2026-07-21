@@ -75,3 +75,12 @@ export const DEFAULT_PERMISSIONS = {
 		interface: true
 	}
 } as const;
+
+type DeepMutable<T> = {
+	-readonly [K in keyof T]: T[K] extends boolean ? boolean : DeepMutable<T[K]>;
+};
+
+export type PermissionConfig = DeepMutable<typeof DEFAULT_PERMISSIONS>;
+export type PartialPermissionConfig = {
+	[K in keyof PermissionConfig]?: Partial<PermissionConfig[K]>;
+};

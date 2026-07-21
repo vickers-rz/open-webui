@@ -120,7 +120,7 @@
 							{$i18n.t('Direct')}
 						</span>
 						<Tooltip content={$i18n.t('Add Terminal')} placement="top">
-							<button
+							<button aria-label="Add terminal"
 								type="button"
 								class="p-0.5 rounded-md text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition"
 								on:click|stopPropagation={() => {
@@ -191,7 +191,7 @@
 						</span>
 						{#if $user?.role === 'admin'}
 							<Tooltip content={$i18n.t('Add Terminal')} placement="top">
-								<button
+								<button aria-label="Add terminal"
 									type="button"
 									class="p-0.5 rounded-md text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition"
 									on:click|stopPropagation={() => {

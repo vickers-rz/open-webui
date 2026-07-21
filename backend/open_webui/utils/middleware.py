@@ -41,6 +41,7 @@ from open_webui.env import (
 )
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
+from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.functions import Functions
 from open_webui.models.models import Models
@@ -155,6 +156,129 @@ DEFAULT_CODE_INTERPRETER_TAGS = [('<code_interpreter>', '</code_interpreter>')]
 def output_id(prefix: str) -> str:
     """Generate OR-style ID: prefix + 24-char hex UUID."""
     return f'{prefix}_{uuid4().hex[:24]}'
+
+
+FACT_CHECK_INTENT_RE = re.compile(
+    r'(核查|查证|事实|属实|真实性|客观|fact[- ]?check|verify|verification)',
+    re.IGNORECASE,
+)
+FACT_CHECK_FILE_CONTEXT_CHARS = 12000
+FACT_CHECK_MAX_QUERIES = 3
+FACT_CHECK_MAX_WEB_RESULTS = 8
+
+
+def _looks_like_fact_check_request(prompt: str | None) -> bool:
+    return bool(prompt and FACT_CHECK_INTENT_RE.search(prompt))
+
+
+async def _get_attached_text_file_context(files: list[dict] | None) -> str:
+    if not files:
+        return ''
+
+    chunks = []
+    for item in files:
+        if not isinstance(item, dict) or item.get('type') not in (None, 'file'):
+            continue
+
+        file_id = item.get('id') or item.get('file', {}).get('id')
+        if not file_id:
+            continue
+
+        file = await Files.get_file_by_id(file_id)
+        content = (file.data or {}).get('content') if file and file.data else None
+        if not isinstance(content, str) or not content.strip():
+            continue
+
+        filename = file.filename if file else item.get('name') or file_id
+        remaining = FACT_CHECK_FILE_CONTEXT_CHARS - sum(len(chunk) for chunk in chunks)
+        if remaining <= 0:
+            break
+
+        chunks.append(f'File: {filename}\n{content[:remaining]}')
+
+    return '\n\n'.join(chunks).strip()
+
+
+def _dedupe_queries(queries: list[str], limit: int = FACT_CHECK_MAX_QUERIES) -> list[str]:
+    deduped = []
+    seen = set()
+    for query in queries:
+        query = re.sub(r'\s+', ' ', str(query or '')).strip()
+        if not query:
+            continue
+        key = query.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(query)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+async def _generate_fact_check_queries_from_files(
+    request: Request,
+    model: str,
+    file_context: str,
+    user_prompt: str,
+    user: UserModel,
+    chat_id: str | None = None,
+) -> list[str]:
+    if not file_context:
+        return []
+
+    prompt = f"""You are preparing web searches for fact-checking an attached transcript/document.
+
+Extract concrete, externally verifiable claims from the document, then write Chinese web search queries for those claims.
+Do not search for generic fact-checking methods. Do not ask where the document is. Prefer named concepts, dates, people, institutions, theories, and specific historical claims.
+
+User request:
+{user_prompt}
+
+Attached document excerpt:
+{file_context}
+
+Return only JSON:
+{{"queries":["query 1","query 2","query 3","query 4","query 5"]}}"""
+
+    payload = {
+        'model': model,
+        'messages': [{'role': 'user', 'content': prompt}],
+        'stream': False,
+        'metadata': {
+            **(request.state.metadata if hasattr(request.state, 'metadata') else {}),
+            'task': str(TASKS.QUERY_GENERATION),
+            'chat_id': chat_id,
+        },
+    }
+
+    response = await generate_chat_completion(request, form_data=payload, user=user)
+    content = response['choices'][0]['message']['content']
+
+    try:
+        bracket_start = content.rfind('{')
+        bracket_end = content.rfind('}') + 1
+        if bracket_start == -1 or bracket_end == 0:
+            return []
+        data = json.loads(content[bracket_start:bracket_end])
+        return _dedupe_queries(data.get('queries', []))
+    except Exception:
+        log.debug('Failed to parse fact-check query generation response', exc_info=True)
+        return []
+
+
+def _trim_web_search_results(results: dict, limit: int = FACT_CHECK_MAX_WEB_RESULTS) -> dict:
+    if not isinstance(results, dict):
+        return results
+
+    trimmed = dict(results)
+    if isinstance(trimmed.get('filenames'), list):
+        trimmed['filenames'] = trimmed['filenames'][:limit]
+    if isinstance(trimmed.get('items'), list):
+        trimmed['items'] = trimmed['items'][:limit]
+    if isinstance(trimmed.get('docs'), list):
+        trimmed['docs'] = trimmed['docs'][:limit]
+    return trimmed
 
 
 def merge_streamed_reasoning_details(target: list, details) -> None:
@@ -1310,6 +1434,8 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
 
     messages = form_data['messages']
     user_message = get_last_user_message(messages)
+    attached_file_context = ''
+    is_fact_check_with_files = _looks_like_fact_check_request(user_message) and bool(form_data.get('files'))
 
     queries = []
     try:
@@ -1359,6 +1485,24 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
         log.exception(e)
         queries = [user_message or '']
 
+    if is_fact_check_with_files:
+        try:
+            attached_file_context = await _get_attached_text_file_context(form_data.get('files'))
+            fact_check_queries = await _generate_fact_check_queries_from_files(
+                request=request,
+                model=form_data['model'],
+                file_context=attached_file_context,
+                user_prompt=user_message or '',
+                user=user,
+                chat_id=extra_params.get('__chat_id__'),
+            )
+            if fact_check_queries:
+                queries = fact_check_queries[:FACT_CHECK_MAX_QUERIES]
+                if ENABLE_QUERIES_CACHE:
+                    request.state.cached_queries = queries
+        except Exception:
+            log.debug('Failed to generate fact-check queries from attached files', exc_info=True)
+
     # Check if generated queries are empty
     if len(queries) == 1 and queries[0].strip() == '':
         queries = [user_message or '']
@@ -1394,6 +1538,8 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
             SearchForm(queries=queries),
             user=user,
         )
+        if is_fact_check_with_files:
+            results = _trim_web_search_results(results)
 
         if results:
             files = form_data.get('files', [])
@@ -1423,6 +1569,16 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
                 )
 
             form_data['files'] = files
+
+            if is_fact_check_with_files:
+                form_data['messages'] = add_or_update_system_message(
+                    'For this request, the retrieval context includes live web_search results and attached file excerpts. '
+                    'Do not say you lack internet access. Treat web_search sources as external web evidence, compare them against the attached manuscript, and answer with a concise claim-by-claim fact-check. '
+                    'Separate externally verifiable factual claims from subjective or interpretive opinions. '
+                    'Do not output a thinking process, analysis plan, or hidden reasoning; output only the final answer.',
+                    form_data['messages'],
+                    append=True,
+                )
 
             await event_emitter(
                 {
@@ -1768,8 +1924,15 @@ async def chat_completion_files_handler(
         # Check if all files are in full context mode
         all_full_context = all(item.get('context') == 'full' for item in files)
 
-        queries = []
-        if not all_full_context:
+        queries = _dedupe_queries(
+            [
+                query
+                for item in files
+                if item.get('type') == 'web_search'
+                for query in item.get('queries', [])
+            ]
+        )
+        if not all_full_context and not queries:
             try:
                 queries_response = await generate_queries(
                     request,
@@ -2436,6 +2599,27 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         raise Exception(f'{e}')
 
     features = form_data.pop('features', None) or {}
+    has_attached_files = bool(form_data.get('files'))
+    explicit_web_search_request = any(
+        marker in (user_message or '').lower()
+        for marker in (
+            '联网',
+            '搜索',
+            '搜搜',
+            '核查',
+            '查证',
+            '查找',
+            '检索',
+            'fact check',
+            'fact-check',
+            'web search',
+            'search web',
+            'internet',
+            'online',
+        )
+    )
+    if has_attached_files and features.get('web_search') and not explicit_web_search_request:
+        features['web_search'] = False
     extra_params['__features__'] = features
     if features:
         if 'voice' in features and features['voice']:
@@ -2454,8 +2638,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             form_data = await add_memory_context(request, form_data, user, model)
 
         if 'web_search' in features and features['web_search']:
-            # Skip forced RAG web search when native FC is enabled - model can use web_search tool
-            if metadata.get('params', {}).get('function_calling') == 'legacy':
+            # Explicit search requests must not depend on the model choosing to call an optional tool.
+            if (
+                metadata.get('params', {}).get('function_calling') == 'legacy'
+                or explicit_web_search_request
+            ):
                 form_data = await chat_web_search_handler(request, form_data, extra_params, user)
 
         if 'image_generation' in features and features['image_generation']:
@@ -3541,6 +3728,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                             {
                                 'done': True,
                                 'role': 'assistant',
+                                'content': content,
                                 'output': response_output,
                                 **({'usage': usage} if usage else {}),
                             },
@@ -4222,8 +4410,11 @@ async def streaming_chat_response_handler(response, ctx):
 
                                     delta_tool_calls = delta.get('tool_calls', None)
                                     if delta_tool_calls:
-                                        for delta_tool_call in delta_tool_calls:
+                                        for tool_call_idx, delta_tool_call in enumerate(delta_tool_calls):
                                             tool_call_index = delta_tool_call.get('index')
+                                            if tool_call_index is None:
+                                                tool_call_index = tool_call_idx
+                                                delta_tool_call['index'] = tool_call_index
 
                                             if tool_call_index is not None:
                                                 # Check if the tool call already exists
@@ -5206,6 +5397,21 @@ async def streaming_chat_response_handler(response, ctx):
                             break
 
                 # Mark all in-progress items as completed
+                if not output and not content.strip():
+                    content = (
+                        'The model completed without returning visible content. '
+                        'Please retry, or switch to a non-thinking model if this repeats.'
+                    )
+                    output.append(
+                        {
+                            'type': 'message',
+                            'id': output_id('msg'),
+                            'status': 'completed',
+                            'role': 'assistant',
+                            'content': [{'type': 'output_text', 'text': content}],
+                        }
+                    )
+
                 for item in output:
                     if item.get('status') == 'in_progress':
                         item['status'] = 'completed'
@@ -5223,29 +5429,16 @@ async def streaming_chat_response_handler(response, ctx):
                 }
 
                 if not metadata.get('chat_id', '').startswith('channel:'):
-                    if not ENABLE_REALTIME_CHAT_SAVE:
-                        # Save message in the database
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {
-                                'done': True,
-                                'output': output,
-                                **({'usage': usage} if usage else {}),
-                            },
-                        )
-                    elif usage:
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {'done': True, 'usage': usage},
-                        )
-                    else:
-                        await Chats.upsert_message_to_chat_by_id_and_message_id(
-                            metadata['chat_id'],
-                            metadata['message_id'],
-                            {'done': True},
-                        )
+                    await Chats.upsert_message_to_chat_by_id_and_message_id(
+                        metadata['chat_id'],
+                        metadata['message_id'],
+                        {
+                            'done': True,
+                            'content': content,
+                            'output': output,
+                            **({'usage': usage} if usage else {}),
+                        },
+                    )
 
                 # Send a webhook notification if the user is not active
                 if await Config.get('ui.enable_user_webhooks') and not await Users.is_user_active(user.id):
@@ -5272,6 +5465,7 @@ async def streaming_chat_response_handler(response, ctx):
                 )
 
                 ctx['assistant_message'] = {
+                    'content': content,
                     'output': output,
                     **({'usage': usage} if usage else {}),
                 }

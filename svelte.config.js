@@ -48,7 +48,12 @@ const config = {
 	},
 	onwarn: (warning, handler) => {
 		const { code } = warning;
-		if (code === 'css-unused-selector') return;
+		if (
+			code === 'css_unused_selector' ||
+			code === 'export_let_unused' ||
+			code === 'reactive_declaration_module_script_dependency'
+		)
+			return;
 
 		handler(warning);
 	}
