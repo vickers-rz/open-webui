@@ -10,6 +10,14 @@ from open_webui.utils.misc import (
 from open_webui.utils.task import prompt_template, prompt_variables_template
 
 
+OLLAMA_ONLY_MODEL_PARAMS = frozenset(
+    {
+        'num_ctx',
+        'num_predict',
+    }
+)
+
+
 async def resolve_system_prompt(
     system: Optional[str],
     metadata: Optional[dict] = None,
@@ -95,11 +103,20 @@ def remove_open_webui_params(params: dict) -> dict:
     return params
 
 
+def remove_ollama_only_model_params(params: dict) -> dict:
+    """Remove Ollama-only parameters before an OpenAI-compatible request."""
+    for key in OLLAMA_ONLY_MODEL_PARAMS:
+        params.pop(key, None)
+
+    return params
+
+
 # inplace function: form_data is modified
 def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
     params = remove_open_webui_params(params)
 
     custom_params = params.pop('custom_params', {})
+    params = remove_ollama_only_model_params(params)
     if custom_params:
         # Attempt to parse custom_params if they are strings
         for key, value in custom_params.items():

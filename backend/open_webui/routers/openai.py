@@ -82,6 +82,20 @@ def _clean_proxy_headers(raw_headers) -> dict:
     return {k: v for k, v in raw_headers.items() if k not in _STRIP_PROXY_HEADERS}
 
 
+def _is_tool_continuation_payload(payload: dict) -> bool:
+    """Return whether this request asks the model to continue from tool output."""
+    messages = payload.get('messages', [])
+    if isinstance(messages, list) and any(
+        isinstance(message, dict) and message.get('role') == 'tool' for message in messages
+    ):
+        return True
+
+    response_input = payload.get('input', [])
+    return isinstance(response_input, list) and any(
+        isinstance(item, dict) and item.get('type') == 'function_call_output' for item in response_input
+    )
+
+
 async def send_get_request(
     request: Request = None,
     url=None,
@@ -1246,6 +1260,7 @@ async def generate_chat_completion(
                     part.get('text', '') for part in message['content'] if part.get('type') in ('input_text', 'text')
                 )
 
+    is_tool_continuation = _is_tool_continuation_payload(payload)
     payload = json.dumps(payload)
 
     r = None
@@ -1255,15 +1270,24 @@ async def generate_chat_completion(
     try:
         session = await get_session()
 
-        r = await session.request(
-            method='POST',
-            url=request_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
-        )
+        request_attempts = 2 if is_tool_continuation else 1
+        for attempt in range(request_attempts):
+            try:
+                r = await session.request(
+                    method='POST',
+                    url=request_url,
+                    data=payload,
+                    headers=headers,
+                    cookies=cookies,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                    timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT),
+                )
+                break
+            except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+                if attempt + 1 >= request_attempts:
+                    raise
+                log.warning('Tool-result continuation connection failed; retrying once')
+                await asyncio.sleep(0.25)
 
         # Check if response is SSE
         if 'text/event-stream' in r.headers.get('Content-Type', ''):

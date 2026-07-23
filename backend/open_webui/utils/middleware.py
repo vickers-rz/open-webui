@@ -111,7 +111,11 @@ from open_webui.utils.misc import (
     set_last_user_message_content,
     strip_empty_content_blocks,
 )
-from open_webui.utils.payload import apply_system_prompt_to_body, resolve_system_prompt
+from open_webui.utils.payload import (
+    apply_system_prompt_to_body,
+    remove_ollama_only_model_params,
+    resolve_system_prompt,
+)
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
@@ -2060,13 +2064,17 @@ def apply_params_to_form_data(form_data, model):
                     # If it fails, keep the original string
                     pass
 
-        # If custom_params are provided, merge them into params
-        params = deep_update(params, custom_params)
-
     if model.get('owned_by') == 'ollama':
         # Ollama specific parameters
+        if custom_params:
+            params = deep_update(params, custom_params)
         form_data['options'] = params
     else:
+        params = remove_ollama_only_model_params(params)
+        if custom_params:
+            # Explicit custom parameters remain an escape hatch for compatible providers.
+            params = deep_update(params, custom_params)
+
         if isinstance(params, dict):
             for key, value in params.items():
                 if value is not None:
@@ -2802,7 +2810,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         tools_dict = {}
 
         mcp_clients = {}
-        mcp_tools_dict = {}
+        mcp_tool_entries = []
 
         if tool_ids:
             for tool_id in tool_ids:
@@ -2836,16 +2844,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
                             tool_function = await make_tool_function(client, tool_spec['name'])
 
-                            mcp_tools_dict[f'{server_id}_{tool_spec["name"]}'] = {
-                                'spec': {
-                                    **tool_spec,
-                                    'name': f'{server_id}_{tool_spec["name"]}',
-                                },
-                                'callable': tool_function,
-                                'type': 'mcp',
-                                'client': client,
-                                'direct': False,
-                            }
+                            mcp_tool_entries.append(
+                                {
+                                    'server_id': server_id,
+                                    'spec': tool_spec,
+                                    'callable': tool_function,
+                                    'client': client,
+                                }
+                            )
                     except Exception as e:
                         log.debug(e)
                         if event_emitter:
@@ -2869,8 +2875,30 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 },
             )
 
-            if mcp_tools_dict:
-                tools_dict = {**tools_dict, **mcp_tools_dict}
+            for entry in mcp_tool_entries:
+                remote_name = entry['spec']['name']
+                function_name = remote_name
+
+                if function_name in tools_dict:
+                    server_prefix = re.sub(r'[^A-Za-z0-9_]+', '_', entry['server_id']).strip('_') or 'mcp'
+                    function_name = f'{server_prefix}_{remote_name}'
+
+                    suffix = 2
+                    base_name = function_name
+                    while function_name in tools_dict:
+                        function_name = f'{base_name}_{suffix}'
+                        suffix += 1
+
+                tools_dict[function_name] = {
+                    'spec': {
+                        **entry['spec'],
+                        'name': function_name,
+                    },
+                    'callable': entry['callable'],
+                    'type': 'mcp',
+                    'client': entry['client'],
+                    'direct': False,
+                }
 
         # Resolve terminal tools if terminal_id is set (outside tool_ids check
         # so system terminals work even when no other tools are selected)
