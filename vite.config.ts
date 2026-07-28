@@ -23,6 +23,15 @@ export default defineConfig({
 	build: {
 		sourcemap: true
 	},
+	server: {
+		watch: {
+			ignored: [
+				'**/backend/open_webui/data/webui.db',
+				'**/backend/open_webui/data/webui.db-wal',
+				'**/backend/open_webui/data/webui.db-shm'
+			]
+		}
+	},
 	worker: {
 		format: 'es'
 	},

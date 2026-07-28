@@ -417,7 +417,7 @@ def get_citation_source_from_tool_result(
 
             for result in results:
                 title = result.get('title', '')
-                link = result.get('link', '')
+                link = result.get('link') or result.get('url', '')
                 snippet = result.get('snippet', '')
 
                 documents.append(f'{title}\n{snippet}')
@@ -548,6 +548,109 @@ def get_citation_source_from_tool_result(
                 'metadata': [{'source': tool_name}],
             }
         ]
+
+
+WEB_SCRAPE_FAILURE_PATTERNS = (
+    'firecrawl request failed',
+    'incompleteread',
+    '人机识别',
+    '滑动填充拼图',
+    'web 应用防火墙',
+    'captcha',
+)
+
+
+def _get_output_text_part(output_item: dict) -> str:
+    output = output_item.get('output', '')
+    if isinstance(output, list):
+        return '\n'.join(
+            part.get('text', '')
+            for part in output
+            if isinstance(part, dict) and part.get('type') in ('input_text', 'text')
+        )
+    return str(output or '')
+
+
+def _extract_search_result_urls(output_item: dict) -> list[str]:
+    text = _get_output_text_part(output_item)
+    try:
+        parsed = JSONCodec.loads(text)
+    except Exception:
+        return []
+
+    if isinstance(parsed, list) and len(parsed) == 1 and isinstance(parsed[0], dict):
+        nested_text = parsed[0].get('text')
+        if parsed[0].get('type') == 'input_text' and isinstance(nested_text, str):
+            try:
+                parsed = JSONCodec.loads(nested_text)
+            except Exception:
+                return []
+
+    if isinstance(parsed, dict):
+        results = parsed.get('results', [])
+    elif isinstance(parsed, list):
+        results = parsed
+    else:
+        results = []
+
+    urls = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        url = result.get('url') or result.get('link')
+        if isinstance(url, str) and url.startswith(('http://', 'https://')) and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def _build_tool_recovery_instruction(output: list[dict]) -> str | None:
+    search_urls = []
+    scraped_urls = set()
+    has_failed_scrape = False
+
+    calls_by_id = {
+        item.get('call_id'): item
+        for item in output
+        if item.get('type') == 'function_call' and item.get('call_id')
+    }
+
+    for item in output:
+        if item.get('type') != 'function_call_output':
+            continue
+
+        call = calls_by_id.get(item.get('call_id'))
+        if not call:
+            continue
+
+        name = call.get('name')
+        if name == 'search_web':
+            for url in _extract_search_result_urls(item):
+                if url not in search_urls:
+                    search_urls.append(url)
+        elif name == 'web_scrape':
+            try:
+                args = JSONCodec.loads(call.get('arguments') or '{}')
+            except Exception:
+                args = {}
+
+            url = args.get('url')
+            if isinstance(url, str):
+                scraped_urls.add(url)
+
+            text = _get_output_text_part(item).lower()
+            if any(pattern in text for pattern in WEB_SCRAPE_FAILURE_PATTERNS):
+                has_failed_scrape = True
+
+    remaining_urls = [url for url in search_urls if url not in scraped_urls]
+    if not has_failed_scrape or not remaining_urls:
+        return None
+
+    return (
+        'One or more web_scrape results were blocked, incomplete, or otherwise unusable. '
+        'If the user asked for current information and the available tool output is insufficient, '
+        'continue by calling web_scrape on another URL from the prior search results before answering. '
+        f'Untried search result URLs: {", ".join(remaining_urls[:5])}'
+    )
 
 
 def deep_merge(target, source):
@@ -4600,49 +4703,64 @@ async def streaming_chat_response_handler(response, ctx):
                                     if delta_tool_calls:
                                         for delta_tool_call in delta_tool_calls:
                                             tool_call_index = delta_tool_call.get('index')
+                                            tool_call_id = delta_tool_call.get('id')
 
-                                            if tool_call_index is not None:
-                                                # Check if the tool call already exists
-                                                current_response_tool_call = None
-                                                for response_tool_call in response_tool_calls:
-                                                    if response_tool_call.get('index') == tool_call_index:
-                                                        current_response_tool_call = response_tool_call
-                                                        break
+                                            # Some OpenAI-compatible providers (Gemini) omit
+                                            # tool_call.index in streaming chunks. Match by id
+                                            # when available, and allocate a stable index for
+                                            # new calls so downstream batching still works.
+                                            current_response_tool_call = None
+                                            for response_tool_call in response_tool_calls:
+                                                if (
+                                                    tool_call_index is not None
+                                                    and response_tool_call.get('index') == tool_call_index
+                                                ) or (
+                                                    tool_call_index is None
+                                                    and tool_call_id
+                                                    and response_tool_call.get('id') == tool_call_id
+                                                ):
+                                                    current_response_tool_call = response_tool_call
+                                                    break
 
-                                                if current_response_tool_call is None:
-                                                    # Add the new tool call
-                                                    delta_tool_call.setdefault('function', {})
-                                                    delta_tool_call['function'].setdefault('name', '')
-                                                    delta_arguments = delta_tool_call['function'].get('arguments')
-                                                    if not isinstance(delta_arguments, str):
-                                                        delta_tool_call['function']['arguments'] = (
-                                                            ''
-                                                            if delta_arguments is None
-                                                            else json.dumps(delta_arguments)
-                                                        )
-                                                    response_tool_calls.append(delta_tool_call)
+                                            if tool_call_index is None:
+                                                if current_response_tool_call is not None:
+                                                    tool_call_index = current_response_tool_call.get('index')
                                                 else:
-                                                    # Update the existing tool call
-                                                    delta_name = delta_tool_call.get('function', {}).get('name')
-                                                    delta_arguments = delta_tool_call.get('function', {}).get(
-                                                        'arguments'
+                                                    tool_call_index = len(response_tool_calls)
+                                                    delta_tool_call['index'] = tool_call_index
+                                            else:
+                                                delta_tool_call['index'] = tool_call_index
+
+                                            if current_response_tool_call is None:
+                                                # Add the new tool call
+                                                delta_tool_call.setdefault('function', {})
+                                                delta_tool_call['function'].setdefault('name', '')
+                                                delta_arguments = delta_tool_call['function'].get('arguments')
+                                                if not isinstance(delta_arguments, str):
+                                                    delta_tool_call['function']['arguments'] = (
+                                                        ''
+                                                        if delta_arguments is None
+                                                        else json.dumps(delta_arguments)
                                                     )
+                                                response_tool_calls.append(delta_tool_call)
+                                            else:
+                                                # Update the existing tool call
+                                                delta_name = delta_tool_call.get('function', {}).get('name')
+                                                delta_arguments = delta_tool_call.get('function', {}).get('arguments')
 
-                                                    if delta_name:
-                                                        current_response_tool_call['function']['name'] = delta_name
+                                                if delta_name:
+                                                    current_response_tool_call['function']['name'] = delta_name
 
-                                                    if delta_arguments is not None:
-                                                        if not isinstance(delta_arguments, str):
-                                                            delta_arguments = json.dumps(delta_arguments)
-                                                        current_response_tool_call.setdefault('function', {})
-                                                        if not isinstance(
-                                                            current_response_tool_call['function'].get('arguments'),
-                                                            str,
-                                                        ):
-                                                            current_response_tool_call['function']['arguments'] = ''
-                                                        current_response_tool_call['function']['arguments'] += (
-                                                            delta_arguments
-                                                        )
+                                                if delta_arguments is not None:
+                                                    if not isinstance(delta_arguments, str):
+                                                        delta_arguments = json.dumps(delta_arguments)
+                                                    current_response_tool_call.setdefault('function', {})
+                                                    if not isinstance(
+                                                        current_response_tool_call['function'].get('arguments'),
+                                                        str,
+                                                    ):
+                                                        current_response_tool_call['function']['arguments'] = ''
+                                                    current_response_tool_call['function']['arguments'] += delta_arguments
 
                                         # Emit pending tool calls in real-time
                                         if response_tool_calls:
@@ -5422,6 +5540,14 @@ async def streaming_chat_response_handler(response, ctx):
                                     }
                                 )
 
+                        tool_recovery_instruction = _build_tool_recovery_instruction(output)
+                        if tool_recovery_instruction:
+                            new_form_data['messages'] = add_or_update_system_message(
+                                tool_recovery_instruction,
+                                new_form_data['messages'],
+                                append=True,
+                            )
+
                         res = await generate_chat_completion(
                             request,
                             new_form_data,
@@ -5643,6 +5769,21 @@ async def streaming_chat_response_handler(response, ctx):
                             log.exception('Code interpreter continuation failed: %s', error_content)
                             await emit_message_error(error_content)
                             break
+
+                if not output and not content.strip():
+                    content = (
+                        'The model completed without returning visible content. '
+                        'Please retry, or switch to a non-thinking model if this repeats.'
+                    )
+                    output.append(
+                        {
+                            'type': 'message',
+                            'id': output_id('msg'),
+                            'status': 'completed',
+                            'role': 'assistant',
+                            'content': [{'type': 'output_text', 'text': content}],
+                        }
+                    )
 
                 # Mark all in-progress items as completed
                 for item in output:
