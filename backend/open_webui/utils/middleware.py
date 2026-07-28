@@ -42,6 +42,7 @@ from open_webui.env import (
 )
 from open_webui.models.chats import Chats
 from open_webui.models.config import Config
+from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.models import Models
 from open_webui.models.notes import Notes
@@ -94,9 +95,16 @@ from open_webui.utils.filter import (
     get_filter_functions,
     process_filter_functions,
 )
+from open_webui.utils.fact_check import (
+    dedupe_queries,
+    is_explicit_web_search_request,
+    looks_like_fact_check_request,
+    trim_web_search_results,
+)
 
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.mcp.client import MCPClient
+from open_webui.utils.mcp.naming import allocate_mcp_tool_name
 from open_webui.utils.memory import add_memory_context, review_memory_after_turn
 from open_webui.utils.misc import (
     add_or_update_system_message,
@@ -121,6 +129,7 @@ from open_webui.utils.misc import (
 )
 from open_webui.utils.payload import apply_system_prompt_to_body, resolve_system_prompt
 from open_webui.utils.plugin import load_function_module_by_id
+from open_webui.utils.provider_compat import remove_ollama_only_model_params
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.task import (
@@ -202,6 +211,93 @@ def _start_tag_pattern(start_tag: str) -> str:
 def output_id(prefix: str) -> str:
     """Generate OR-style ID: prefix + 24-char hex UUID."""
     return f'{prefix}_{uuid4().hex[:24]}'
+
+
+FACT_CHECK_FILE_CONTEXT_CHARS = 12000
+FACT_CHECK_MAX_QUERIES = 3
+FACT_CHECK_MAX_WEB_RESULTS = 8
+
+
+async def _get_attached_text_file_context(files: list[dict] | None) -> str:
+    if not files:
+        return ''
+
+    chunks = []
+    context_length = 0
+    for item in files:
+        if not isinstance(item, dict) or item.get('type') not in (None, 'file'):
+            continue
+
+        nested_file = item.get('file')
+        file_id = item.get('id') or (nested_file.get('id') if isinstance(nested_file, dict) else None)
+        if not file_id:
+            continue
+
+        file = await Files.get_file_by_id(file_id)
+        content = (file.data or {}).get('content') if file and file.data else None
+        if not isinstance(content, str) or not content.strip():
+            continue
+
+        remaining = FACT_CHECK_FILE_CONTEXT_CHARS - context_length
+        if remaining <= 0:
+            break
+
+        chunk = f'File: {file.filename}\n{content[:remaining]}'
+        chunks.append(chunk)
+        context_length += len(chunk)
+
+    return '\n\n'.join(chunks).strip()
+
+
+async def _generate_fact_check_queries_from_files(
+    request: Request,
+    model: str,
+    file_context: str,
+    user_prompt: str,
+    user: UserModel,
+    chat_id: str | None = None,
+) -> list[str]:
+    if not file_context:
+        return []
+
+    prompt = f"""You are preparing web searches for fact-checking an attached transcript or document.
+
+Extract concrete, externally verifiable claims from the document, then write Chinese web search queries for those claims.
+Do not search for generic fact-checking methods. Prefer named concepts, dates, people, institutions, theories, and specific historical claims.
+
+User request:
+{user_prompt}
+
+Attached document excerpt:
+{file_context}
+
+Return only JSON:
+{{"queries":["query 1","query 2","query 3","query 4","query 5"]}}"""
+
+    payload = {
+        'model': model,
+        'messages': [{'role': 'user', 'content': prompt}],
+        'stream': False,
+        'metadata': {
+            **(request.state.metadata if hasattr(request.state, 'metadata') else {}),
+            'task': str(TASKS.QUERY_GENERATION),
+            'chat_id': chat_id,
+        },
+    }
+
+    response = await generate_chat_completion(request, form_data=payload, user=user)
+    content = response['choices'][0]['message']['content']
+
+    try:
+        bracket_start = content.rfind('{')
+        bracket_end = content.rfind('}') + 1
+        if bracket_start == -1 or bracket_end == 0:
+            return []
+        data = JSONCodec.loads(content[bracket_start:bracket_end])
+        return dedupe_queries(data.get('queries', []), FACT_CHECK_MAX_QUERIES)
+    except Exception:
+        log.debug('Failed to parse fact-check query generation response', exc_info=True)
+        return []
 
 
 def merge_streamed_reasoning_details(target: list, details) -> None:
@@ -1371,6 +1467,7 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
 
     messages = form_data['messages']
     user_message = get_last_user_message(messages)
+    is_fact_check_with_files = looks_like_fact_check_request(user_message) and bool(form_data.get('files'))
 
     queries = []
     try:
@@ -1420,6 +1517,24 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
         log.exception(e)
         queries = [user_message or '']
 
+    if is_fact_check_with_files:
+        try:
+            file_context = await _get_attached_text_file_context(form_data.get('files'))
+            fact_check_queries = await _generate_fact_check_queries_from_files(
+                request=request,
+                model=form_data['model'],
+                file_context=file_context,
+                user_prompt=user_message or '',
+                user=user,
+                chat_id=extra_params.get('__chat_id__'),
+            )
+            if fact_check_queries:
+                queries = fact_check_queries
+                if ENABLE_QUERIES_CACHE:
+                    request.state.cached_queries = queries
+        except Exception:
+            log.debug('Failed to generate fact-check queries from attached files', exc_info=True)
+
     # Check if generated queries are empty
     if len(queries) == 1 and queries[0].strip() == '':
         queries = [user_message or '']
@@ -1455,6 +1570,8 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
             SearchForm(queries=queries),
             user=user,
         )
+        if is_fact_check_with_files:
+            results = trim_web_search_results(results, FACT_CHECK_MAX_WEB_RESULTS)
 
         if results:
             files = form_data.get('files', [])
@@ -1484,6 +1601,17 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
                 )
 
             form_data['files'] = files
+
+            if is_fact_check_with_files:
+                form_data['messages'] = add_or_update_system_message(
+                    'For this request, the retrieval context includes live web_search results and attached file excerpts. '
+                    'Do not say you lack internet access. Treat web_search sources as external web evidence, compare them '
+                    'against the attached document, and answer with a concise claim-by-claim fact-check. Separate '
+                    'externally verifiable factual claims from subjective or interpretive opinions. Do not output a '
+                    'thinking process, analysis plan, or hidden reasoning; output only the final answer.',
+                    form_data['messages'],
+                    append=True,
+                )
 
             await event_emitter(
                 {
@@ -1973,13 +2101,16 @@ def apply_params_to_form_data(form_data, model):
                     # If it fails, keep the original string
                     pass
 
-        # If custom_params are provided, merge them into params
-        params = deep_update(params, custom_params)
-
     if model.get('owned_by') == 'ollama':
         # Ollama specific parameters
+        if custom_params:
+            params = deep_update(params, custom_params)
         form_data['options'] = params
     else:
+        params = remove_ollama_only_model_params(params)
+        if custom_params:
+            params = deep_update(params, custom_params)
+
         if isinstance(params, dict):
             for key, value in params.items():
                 if value is not None:
@@ -2526,6 +2657,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             raise Exception(f'{e}')
 
     features = form_data.pop('features', None) or {}
+    has_attached_files = bool(form_data.get('files'))
+    explicit_web_search_request = is_explicit_web_search_request(user_message)
+    if has_attached_files and features.get('web_search') and not explicit_web_search_request:
+        features['web_search'] = False
+
     extra_params['__features__'] = features
     if features:
         if 'voice' in features and features['voice']:
@@ -2549,8 +2685,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 'features.web_search',
                 await Config.get('user.permissions'),
             ):
-                # Skip forced RAG web search when native FC is enabled - model can use web_search tool
-                if metadata.get('params', {}).get('function_calling') == 'legacy':
+                if metadata.get('params', {}).get('function_calling') == 'legacy' or explicit_web_search_request:
                     form_data = await chat_web_search_handler(request, form_data, extra_params, user)
 
         if 'image_generation' in features and features['image_generation']:
@@ -2732,7 +2867,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         tools_dict = {}
 
         mcp_clients = {}
-        mcp_tools_dict = {}
+        mcp_tool_entries = []
 
         if tool_ids:
             db_tool_ids = []
@@ -2767,16 +2902,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
                             tool_function = await make_tool_function(client, tool_spec['name'])
 
-                            mcp_tools_dict[f'{server_id}_{tool_spec["name"]}'] = {
-                                'spec': {
-                                    **tool_spec,
-                                    'name': f'{server_id}_{tool_spec["name"]}',
-                                },
-                                'callable': tool_function,
-                                'type': 'mcp',
-                                'client': client,
-                                'direct': False,
-                            }
+                            mcp_tool_entries.append(
+                                {
+                                    'server_id': server_id,
+                                    'spec': tool_spec,
+                                    'callable': tool_function,
+                                    'client': client,
+                                }
+                            )
                     except Exception as e:
                         log.debug(e)
                         if event_emitter:
@@ -2803,8 +2936,22 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     },
                 )
 
-            if mcp_tools_dict:
-                tools_dict = {**tools_dict, **mcp_tools_dict}
+            for entry in mcp_tool_entries:
+                function_name = allocate_mcp_tool_name(
+                    entry['spec']['name'],
+                    entry['server_id'],
+                    tools_dict,
+                )
+                tools_dict[function_name] = {
+                    'spec': {
+                        **entry['spec'],
+                        'name': function_name,
+                    },
+                    'callable': entry['callable'],
+                    'type': 'mcp',
+                    'client': entry['client'],
+                    'direct': False,
+                }
 
         # Resolve terminal tools if terminal_id is set (outside tool_ids check
         # so system terminals work even when no other tools are selected)

@@ -53,6 +53,10 @@ from open_webui.utils.payload import (
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
 )
+from open_webui.utils.provider_compat import (
+    is_tool_continuation_payload,
+    request_with_tool_continuation_retry,
+)
 from open_webui.utils.session_pool import (
     cleanup_response,
     get_client_timeout,
@@ -1329,6 +1333,7 @@ async def generate_chat_completion(
     if not is_streaming_request:
         payload.pop('stream_options', None)
 
+    is_tool_continuation = is_tool_continuation_payload(payload)
     payload = json.dumps(payload)
 
     r = None
@@ -1338,14 +1343,17 @@ async def generate_chat_completion(
     try:
         session = await get_session()
 
-        r = await session.request(
-            method='POST',
-            url=request_url,
-            data=payload,
-            headers=headers,
-            cookies=cookies,
-            ssl=AIOHTTP_CLIENT_SESSION_SSL,
-            timeout=get_client_timeout(stream=is_streaming_request),
+        r = await request_with_tool_continuation_retry(
+            lambda: session.request(
+                method='POST',
+                url=request_url,
+                data=payload,
+                headers=headers,
+                cookies=cookies,
+                ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                timeout=get_client_timeout(stream=is_streaming_request),
+            ),
+            is_tool_continuation=is_tool_continuation,
         )
 
         # Check if response is SSE

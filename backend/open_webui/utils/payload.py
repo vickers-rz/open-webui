@@ -7,6 +7,7 @@ from open_webui.utils.misc import (
     replace_system_message_content,
 )
 from open_webui.utils.chat_variables import render_chat_variables, render_user_variables
+from open_webui.utils.provider_compat import remove_ollama_only_model_params
 from open_webui.utils.task import prompt_template, prompt_variables_template
 
 
@@ -109,6 +110,7 @@ def apply_model_params_to_body_openai(params: dict, form_data: dict) -> dict:
     params = remove_open_webui_params(params)
 
     custom_params = params.pop('custom_params', {})
+    params = remove_ollama_only_model_params(params)
     if custom_params:
         # Attempt to parse custom_params if they are strings
         for key, value in custom_params.items():
